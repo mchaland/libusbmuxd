@@ -49,6 +49,11 @@ static uint16_t device_port = 0;
 
 struct client_data {
 	int fd;
+#ifdef WIN32
+	HANDLE acceptor = NULL;
+#else
+	pthread_t acceptor;
+#endif
 	int sfd;
 	volatile int stop_ctos;
 	volatile int stop_stoc;
@@ -211,6 +216,8 @@ static void *acceptor_thread(void *arg)
 		close(cdata->sfd);
 	}
 
+	free(cdata);
+
 	return NULL;
 }
 
@@ -242,33 +249,28 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Error creating socket: %s\n", strerror(errno));
 		return -errno;
 	} else {
-#ifdef WIN32
-		HANDLE acceptor = NULL;
-#else
-		pthread_t acceptor;
-#endif
 		struct sockaddr_in c_addr;
 		socklen_t len = sizeof(struct sockaddr_in);
-		struct client_data cdata;
 		int c_sock;
 		while (1) {
 			printf("waiting for connection\n");
 			c_sock = accept(mysock, (struct sockaddr*)&c_addr, &len);
 			if (c_sock) {
 				printf("accepted connection, fd = %d\n", c_sock);
-				cdata.fd = c_sock;
+				struct client_data *cdata =
+					(struct client_data *) malloc(sizeof(struct client_data));
+				cdata->fd = c_sock;
 #ifdef WIN32
-				acceptor = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)acceptor_thread, &cdata, 0, NULL);
-				WaitForSingleObject(acceptor, INFINITE);
+				cdata->acceptor =
+					CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)acceptor_thread, cdata, 0, NULL);
+				WaitForSingleObject(cdata->acceptor, INFINITE);
 #else
-				pthread_create(&acceptor, NULL, acceptor_thread, &cdata);
-				pthread_join(acceptor, NULL);
+				pthread_create(&cdata->acceptor, NULL, acceptor_thread, cdata);
 #endif
 			} else {
 				break;
 			}
 		}
-		close(c_sock);
 		close(mysock);
 	}
 
